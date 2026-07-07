@@ -1,0 +1,9 @@
+```text
+chromadb
+sentence-transformers
+streamlit
+pandas
+numpy
+pydantic
+ollama
+```
