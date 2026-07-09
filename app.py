@@ -6,6 +6,7 @@ from models.schemas import UserProfile
 from agents.search_agent import SearchAgent
 from agents.eligibility_agent import EligibilityAgent
 from agents.explanation_agent import ExplanationAgent
+from agents.action_agent import ActionAgent
 
 # How many of the most relevant schemes to check (not shown to the user).
 CANDIDATE_COUNT = 8
@@ -27,6 +28,7 @@ def load_agents():
         "search": SearchAgent(),
         "eligibility": EligibilityAgent(),
         "explanation": ExplanationAgent(),
+        "action": ActionAgent(),
     }
 
 
@@ -129,6 +131,8 @@ if submitted:
         "models agree they need more information from you to decide — so confirm on "
         "the official portal before applying. Only schemes above 50% confidence are shown."
     )
+    actions = {i.scheme_id: i for i in agents["action"].run(shown).items}
+
     icons = {"eligible": "✅", "not_eligible": "❌", "unclear": "❓"}
     for r in shown:
         conf = f"{int(r.confidence * 100)}%"
@@ -148,3 +152,12 @@ if submitted:
                 st.markdown("**Documents:** " + ", ".join(r.required_documents))
             if r.missing_info:
                 st.markdown("**Need to know:** " + ", ".join(r.missing_info))
+
+            item = actions.get(r.scheme_id)
+            if item and item.apply_urls:
+                st.markdown(
+                    "**How to apply:** "
+                    + "  ·  ".join(f"[Apply / info]({u})" for u in item.apply_urls)
+                )
+            if item and item.steps:
+                st.caption("Next steps: " + item.steps)

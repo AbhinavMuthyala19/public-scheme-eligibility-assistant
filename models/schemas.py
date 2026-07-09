@@ -79,3 +79,15 @@ class EligibilityAgentResponse(BaseModel):
 class ExplanationAgentResponse(BaseModel):
     language: str
     explanation: str
+
+
+class ActionItem(BaseModel):
+    scheme_id: str
+    scheme_name: Optional[str] = None
+    apply_urls: list[str] = []
+    documents: list[str] = []
+    steps: Optional[str] = None
+
+
+class ActionAgentResponse(BaseModel):
+    items: list[ActionItem]
