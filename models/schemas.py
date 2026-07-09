@@ -17,6 +17,7 @@ class UserProfile(BaseModel):
     disability: Optional[bool] = None
     minority: Optional[bool] = None
     marital_status: Optional[str] = None
+    area: Optional[str] = None            # e.g. Rural / Urban
 
 
 class ProviderOutput(BaseModel):
@@ -39,3 +40,42 @@ class ProfileAgentResponse(BaseModel):
     missing_fields: list[str]
     is_complete: bool
     comparison: Optional[LLMComparison] = None
+
+
+class SchemeCandidate(BaseModel):
+    """One scheme returned by the Search Agent."""
+    scheme_id: str
+    slug: Optional[str] = None
+    scheme_name: Optional[str] = None
+    state: Optional[str] = None
+    level: Optional[str] = None
+    categories: Optional[str] = None
+    ministry: Optional[str] = None
+    distance: float                       # lower = more relevant
+    best_chunk: Optional[str] = None      # the closest-matching text chunk
+
+
+class SearchAgentResponse(BaseModel):
+    query: str                            # the query built from the profile
+    candidates: list[SchemeCandidate]
+
+
+class EligibilityVerdict(BaseModel):
+    """The eligibility outcome for one scheme."""
+    scheme_id: str
+    scheme_name: Optional[str] = None
+    verdict: str                          # "eligible" | "not_eligible" | "unclear"
+    reasons: list[str] = []
+    required_documents: list[str] = []
+    missing_info: list[str] = []
+    confidence: float = 0.0               # LLM ensemble confidence in the verdict (0..1)
+    needs_review: bool = False            # flagged when they disagree or it's unclear
+
+
+class EligibilityAgentResponse(BaseModel):
+    results: list[EligibilityVerdict]
+
+
+class ExplanationAgentResponse(BaseModel):
+    language: str
+    explanation: str

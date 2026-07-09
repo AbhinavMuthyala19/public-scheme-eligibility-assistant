@@ -57,6 +57,7 @@ class ClaudeProvider(LLMProvider):
         resp = self.client.messages.create(
             model=self.model,
             max_tokens=1024,
+            temperature=0,   # deterministic: same input -> same verdict
             system=system,
             messages=[{"role": "user", "content": user}],
         )
@@ -76,6 +77,7 @@ class OpenAIProvider(LLMProvider):
     def complete(self, system: str, user: str) -> str:
         resp = self.client.chat.completions.create(
             model=self.model,
+            temperature=0,   # deterministic: same input -> same verdict
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
