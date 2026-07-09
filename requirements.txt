@@ -1,9 +1,10 @@
-```text
 chromadb
 sentence-transformers
 streamlit
 pandas
 numpy
 pydantic
-ollama
-```
+# ollama            # replaced by hosted LLM providers below
+anthropic
+openai
+python-dotenv
