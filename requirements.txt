@@ -8,3 +8,4 @@ pydantic
 anthropic
 openai
 python-dotenv
+langgraph

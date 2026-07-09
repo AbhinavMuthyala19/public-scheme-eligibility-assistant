@@ -1,177 +1,133 @@
-````markdown
 # Public Scheme Eligibility Assistant
 
-An Agentic AI application that recommends Indian Government schemes based on a user's profile using Retrieval-Augmented Generation (RAG), ChromaDB, and multiple AI agents.
+An agentic AI application that helps Indian citizens discover government welfare
+schemes they may qualify for. The user answers a few questions; the system
+retrieves relevant schemes from ~4,700 schemes across India, checks eligibility
+against each scheme's own rules using two LLMs in agreement, and returns a
+plain-language, multilingual explanation with the documents needed and where to
+apply.
+
+The agents are orchestrated with **LangGraph**, and every eligibility decision
+is cross-checked by **two LLMs (Claude + GPT)** so low-confidence answers can be
+flagged for human review instead of guessed.
 
 ---
 
-# Tech Stack
+## Key ideas
 
-- Python
-- ChromaDB
-- Sentence Transformers
-- Ollama
-- Streamlit
-- Pydantic
-
----
-
-# Project Architecture
-
-```
-User
-    │
-    ▼
-Orchestration Agent
-    │
-    ▼
-Profile Agent
-    │
-    ▼
-Search Agent
-    │
-    ▼
-Eligibility Agent
-    │
-    ▼
-Explanation Agent
-    │
-    ▼
-Action Agent
-```
+- **RAG over all Indian schemes** — scheme text is chunked (with overlap) and
+  embedded into ChromaDB; retrieval is filtered by the user's state so results
+  are both relevant and geographically valid.
+- **Grounded eligibility** — the Eligibility Agent judges the user only against
+  each scheme's own eligibility text; it never invents criteria.
+- **Multi-LLM confidence** — Claude and GPT both answer; agreement becomes a
+  confidence score, and disagreement/uncertainty is flagged `needs review`.
+- **Deterministic where it should be** — search filtering and the Action step
+  (apply URLs) are plain code, not LLM calls.
+- **Agentic orchestration** — a LangGraph `StateGraph` with conditional routing
+  (a profile-completeness gate and a no-results gate).
 
 ---
 
-# Folder Structure
+## Architecture
 
 ```
-SchemesProject/
-│
+                 ┌──────────────┐
+   user form ──▶ │  Profile     │  build/validate profile
+                 └──────┬───────┘
+                        │  (missing State?) ──▶ clarify ▶ END
+                        ▼
+                 ┌──────────────┐
+                 │  Search      │  RAG over ChromaDB + state filter
+                 └──────┬───────┘
+                        ▼
+                 ┌──────────────┐
+                 │  Eligibility │  Claude + GPT, grounded, confidence
+                 └──────┬───────┘
+                        │  (no matches?) ──▶ no_matches ▶ END
+                        ▼
+                 ┌──────────────┐
+                 │  Explanation │  plain-language, multilingual
+                 └──────┬───────┘
+                        ▼
+                 ┌──────────────┐
+                 │  Action      │  apply URLs + next steps
+                 └──────┬───────┘
+                        ▼
+                       END
+```
+
+The graph is defined in `graph.py`. Each node wraps one agent from `agents/`.
+
+---
+
+## Tech stack
+
+- **Python**, **Streamlit** (UI)
+- **LangGraph** (agent orchestration)
+- **Anthropic Claude** + **OpenAI GPT** (multi-LLM ensemble)
+- **ChromaDB** + **Sentence-Transformers** (`all-MiniLM-L6-v2`) for RAG
+- **Pydantic** (typed state and schemas)
+
+---
+
+## Project structure
+
+```
+public-scheme-eligibility-assistant/
 ├── agents/
-│
-├── chroma_db/
-│
-├── data/
-│   └── merged_schemes.csv
-│
-├── models/
-│
-├── prompts/
-│
-├── utils/
-│
-├── app.py
-├── config.py
-├── requirements.txt
-├── README.md
-└── .gitignore
+│   ├── profile_agent.py        # free-text -> structured profile (ensemble)
+│   ├── search_agent.py         # profile -> query -> Chroma retrieval
+│   ├── eligibility_agent.py    # grounded eligibility via Claude + GPT
+│   ├── explanation_agent.py    # plain-language, multilingual summary
+│   └── action_agent.py         # apply URLs + next steps (deterministic)
+├── llm/
+│   ├── providers.py            # Claude / GPT adapters behind one interface
+│   └── ensemble.py             # call both, parse JSON, score agreement
+├── prompts/                    # system prompts per agent
+├── models/schemas.py           # Pydantic models (profile, verdicts, ...)
+├── src/build_vectordb.py       # chunk + embed schemes into ChromaDB
+├── retrieval.py                # Chroma search + chunk->scheme dedupe
+├── scheme_store.py             # CSV lookup for full scheme text
+├── graph.py                    # LangGraph StateGraph orchestration
+├── app.py                      # Streamlit UI (runs through the graph)
+├── eval/                       # golden test profiles + runner
+├── data/merged_schemes.csv     # scheme dataset (~4,700 schemes)
+├── config.py                   # paths, models, keys (from .env)
+└── requirements.txt
 ```
 
 ---
 
-# Setup Instructions
+## Setup
 
-## 1. Clone the repository
-
-```bash
-git clone <repository-url>
-```
-
-Move into the project.
+### 1. Virtual environment
 
 ```bash
-cd SchemesProject
-```
-
----
-
-## 2. Create Virtual Environment
-
-Windows
-
-```bash
-python -m venv schemesproject
-```
-
-Activate
-
-PowerShell
-
-```powershell
-.\schemesproject\Scripts\Activate.ps1
-```
-
-Command Prompt
-
-```cmd
-schemesproject\Scripts\activate.bat
-```
-
----
-
-## 3. Install Dependencies
-
-```bash
+python3 -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
----
+### 2. API keys
 
-## 4. Install Ollama
+Copy `.env.example` to `.env` and add your keys (the file is gitignored):
 
-Download and install Ollama.
+```
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+```
 
-https://ollama.com
-
-Pull the required model.
-
-Example:
+### 3. Build the vector database (one-time)
 
 ```bash
-ollama pull llama3.2
+python3 src/build_vectordb.py
 ```
 
-Ensure Ollama is running before starting the application.
+This chunks and embeds the schemes into `chroma_db/` (~19k chunks). It only
+needs to be built once.
 
----
-
-## 5. Prepare the Data
-
-Place the dataset inside:
-
-```
-data/
-```
-
-Expected file:
-
-```
-merged_schemes.csv
-```
-
----
-
-## 6. Build the Vector Database
-
-Run:
-
-```bash
-python src/build_vectordb.py
-```
-
-This creates:
-
-```
-chroma_db/
-```
-
-The vector database only needs to be built once.
-
----
-
-# Running the Application
-
-Run Streamlit.
+### 4. Run
 
 ```bash
 streamlit run app.py
@@ -179,71 +135,37 @@ streamlit run app.py
 
 ---
 
-# Current Agents
+## How it works
 
-- Profile Agent ✅
-- Search Agent
-- Eligibility Agent
-- Explanation Agent
-- Action Agent
-- Orchestration Agent
-
----
-
-# Team Workflow
-
-After pulling the repository:
-
-```bash
-git pull
-```
-
-Install any newly added packages.
-
-```bash
-pip install -r requirements.txt
-```
-
-If the repository does **not** include the ChromaDB folder, generate it using:
-
-```bash
-python src/build_vectordb.py
-```
+1. **Profile** — the form (or free text via the Profile Agent) produces a typed
+   `UserProfile`. If State is missing, the graph routes to a clarify step.
+2. **Search** — the profile becomes a semantic query; ChromaDB returns the most
+   relevant schemes, filtered to the user's state plus nationally-available
+   ("All") schemes.
+3. **Eligibility** — for each candidate, Claude and GPT independently judge the
+   profile against the scheme's eligibility text and extract required documents.
+   Their agreement is the confidence; disagreement or "unclear" is flagged.
+4. **Explanation** — a single model writes a friendly, grounded summary in the
+   chosen language.
+5. **Action** — apply URLs and next steps are pulled straight from the data.
 
 ---
 
-# Development Workflow
-
-1. Pull latest changes
+## Evaluation
 
 ```bash
-git pull
+python3 eval/run_eval.py
 ```
 
-2. Create a feature branch
-
-```bash
-git checkout -b feature/<feature-name>
-```
-
-3. Commit changes
-
-```bash
-git add .
-git commit -m "Implemented <feature>"
-```
-
-4. Push
-
-```bash
-git push origin feature/<feature-name>
-```
-
-5. Create a Pull Request.
+Runs a set of golden test profiles through the pipeline and checks structural
+correctness (results returned, state filter respected, no ineligible schemes
+shown).
 
 ---
 
-# Contributors
+## Notes
 
-- Team Capstone Project
-````
+- Eligibility is LLM-assisted because the scheme rules are free text, not
+  structured fields; it is grounded and confidence-flagged to stay responsible.
+- This tool provides guidance only — users should confirm on the official
+  government portal before applying.

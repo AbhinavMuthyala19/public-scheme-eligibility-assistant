@@ -1,0 +1,28 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	profile(profile)
+	search(search)
+	eligibility(eligibility)
+	explanation(explanation)
+	action(action)
+	clarify(clarify)
+	no_matches(no_matches)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> profile;
+	eligibility -.-> explanation;
+	eligibility -.-> no_matches;
+	explanation --> action;
+	profile -.-> clarify;
+	profile -.-> search;
+	search --> eligibility;
+	action --> __end__;
+	clarify --> __end__;
+	no_matches --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

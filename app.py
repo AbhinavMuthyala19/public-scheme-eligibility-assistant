@@ -3,10 +3,12 @@ import streamlit as st
 
 from config import DATA_PATH
 from models.schemas import UserProfile
+from agents.profile_agent import ProfileAgent
 from agents.search_agent import SearchAgent
 from agents.eligibility_agent import EligibilityAgent
 from agents.explanation_agent import ExplanationAgent
 from agents.action_agent import ActionAgent
+from graph import build_graph
 
 # How many of the most relevant schemes to check (not shown to the user).
 CANDIDATE_COUNT = 8
@@ -25,11 +27,17 @@ NONE = "— select —"
 @st.cache_resource
 def load_agents():
     return {
+        "profile": ProfileAgent(),
         "search": SearchAgent(),
         "eligibility": EligibilityAgent(),
         "explanation": ExplanationAgent(),
         "action": ActionAgent(),
     }
+
+
+@st.cache_resource
+def load_graph():
+    return build_graph(load_agents())
 
 
 @st.cache_data
@@ -42,7 +50,7 @@ st.set_page_config(page_title="Public Scheme Eligibility Assistant", page_icon="
 st.title("🇮🇳 Public Scheme Eligibility Assistant")
 st.caption("Answer a few questions and we'll find government schemes you may qualify for.")
 
-agents = load_agents()
+graph = load_graph()
 states = load_states()
 
 with st.form("profile_form"):
@@ -86,28 +94,30 @@ if submitted:
         annual_income=float(income) if income else None,
     )
 
-    with st.spinner("Searching schemes..."):
-        candidates = agents["search"].run(profile, top_k=CANDIDATE_COUNT).candidates
+    initial = {"profile": profile, "language": language, "top_k": CANDIDATE_COUNT}
 
-    with st.spinner(f"Checking eligibility across {len(candidates)} schemes (Claude + GPT)..."):
-        results = agents["eligibility"].run(profile, candidates).results
+    with st.spinner("Running the assistant (search → eligibility → explanation → action)..."):
+        final = graph.invoke(initial)
 
-    # eligible first, then unclear, then not_eligible; higher confidence first
-    order = {"eligible": 0, "unclear": 1, "not_eligible": 2}
-    results.sort(key=lambda r: (order.get(r.verdict, 3), -r.confidence))
+    status = final.get("status")
 
-    # Show only schemes above 50% confidence, and never the ones they don't qualify for.
-    shown = [
-        r for r in results
-        if r.confidence > 0.5 and r.verdict != "not_eligible"
-    ]
+    if status == "need_more_info":
+        st.warning(
+            "We need a bit more to search: please provide your "
+            + ", ".join(final.get("missing_fields", []))
+            + "."
+        )
+        st.stop()
 
-    if not shown:
+    shown = final.get("shown") or []
+    if status == "no_matches" or not shown:
         st.warning(
             "No schemes matched with enough confidence. Try adding more details "
             "(category, occupation, income) and search again."
         )
         st.stop()
+
+    actions = {i.scheme_id: i for i in final.get("actions", [])}
 
     n_eligible = sum(r.verdict == "eligible" for r in shown)
     n_review = sum(r.needs_review for r in shown)
@@ -118,20 +128,16 @@ if submitted:
     m2.metric("Avg. confidence", f"{avg_conf}%")
     m3.metric("Needs review", n_review)
 
-    with st.spinner("Writing your summary..."):
-        explanation = agents["explanation"].run(profile, shown, language=language).explanation
-
     st.subheader("What this means for you")
-    st.markdown(explanation)
+    st.markdown(final.get("explanation", ""))
 
     st.subheader("Scheme by scheme")
     st.caption(
         "**Confidence** = how strongly our two AI models (Claude + GPT) agree on the "
         "verdict. **🔎 Needs review** means the result isn't certain — usually the "
         "models agree they need more information from you to decide — so confirm on "
-        "the official portal before applying. Only schemes above 50% confidence are shown."
+        "the official portal before applying. Schemes you clearly don't qualify for are hidden."
     )
-    actions = {i.scheme_id: i for i in agents["action"].run(shown).items}
 
     icons = {"eligible": "✅", "not_eligible": "❌", "unclear": "❓"}
     for r in shown:
