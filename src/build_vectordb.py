@@ -1,31 +1,21 @@
 import os
 import sys
 
-# Make the project root importable so "from config import ..." works
-# when this script is run as "python3 src/build_vectordb.py".
+# Make the project root importable when run as "python3 src/build_vectordb.py".
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
-import chromadb
-from sentence_transformers import SentenceTransformer
 
-from config import (
-    DATA_PATH,
-    CHROMA_DB_PATH,
-    COLLECTION_NAME,
-    EMBEDDING_MODEL,
-    COLLECTION_METADATA,
-)
+from config import DATA_PATH
+from embeddings import embed_texts
+from vectorstore import get_collection
 
 # ==========================
 # Chunking config
 # ==========================
-# all-MiniLM-L6-v2 only reads ~256 tokens, so we split long scheme
-# documents into overlapping word-windows. Overlap keeps information that
-# sits on a boundary from being lost between two chunks.
-CHUNK_SIZE = 180      # words per chunk (stays under the model's token limit)
+CHUNK_SIZE = 180      # words per chunk
 CHUNK_OVERLAP = 40    # words shared between consecutive chunks
-EMBED_BATCH = 64      # chunks embedded per batch
+ADD_BATCH = 250       # rows written per batch (Chroma Cloud free-tier write cap)
 
 
 def chunk_text(text, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
@@ -33,7 +23,6 @@ def chunk_text(text, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     words = text.split()
     if not words:
         return []
-
     step = max(1, size - overlap)
     chunks = []
     for start in range(0, len(words), step):
@@ -46,29 +35,12 @@ def chunk_text(text, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
 def main():
     df = pd.read_csv(DATA_PATH)
 
-    print("Loading embedding model...")
-    model = SentenceTransformer(EMBEDDING_MODEL)
-    print("Model loaded.")
+    # Rebuild the collection fresh (Chroma Cloud if configured, else local).
+    collection = get_collection(create=True)
 
-    client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-
-    # Rebuild from scratch each run.
-    try:
-        client.delete_collection(COLLECTION_NAME)
-    except Exception:
-        pass
-
-    collection = client.get_or_create_collection(
-        name=COLLECTION_NAME,
-        metadata=COLLECTION_METADATA,
-    )
-
-    # 1) Build every chunk + its metadata (linked back to the scheme).
     ids, documents, metadatas = [], [], []
-
     for index, row in df.iterrows():
         document = str(row["document"])
-
         for chunk_index, chunk in enumerate(chunk_text(document)):
             ids.append(f"{index}_{chunk_index}")
             documents.append(chunk)
@@ -83,27 +55,20 @@ def main():
                 "ministry": str(row["ministry"]),
             })
 
-    print(f"{len(df)} schemes -> {len(documents)} overlapping chunks")
+    total = len(documents)
+    print(f"{len(df)} schemes -> {total} overlapping chunks")
+    print("Embedding + uploading in batches...")
 
-    # 2) Embed all chunks in batches (far faster than one-by-one).
-    print("Embedding chunks...")
-    embeddings = model.encode(
-        documents,
-        batch_size=EMBED_BATCH,
-        show_progress_bar=True,
-    ).tolist()
-
-    # 3) Write to Chroma in batches.
-    print("Writing to Chroma...")
-    add_batch = 1000
-    for i in range(0, len(documents), add_batch):
+    for i in range(0, total, ADD_BATCH):
+        batch_docs = documents[i:i + ADD_BATCH]
+        batch_emb = embed_texts(batch_docs)
         collection.add(
-            ids=ids[i:i + add_batch],
-            documents=documents[i:i + add_batch],
-            embeddings=embeddings[i:i + add_batch],
-            metadatas=metadatas[i:i + add_batch],
+            ids=ids[i:i + ADD_BATCH],
+            documents=batch_docs,
+            embeddings=batch_emb,
+            metadatas=metadatas[i:i + ADD_BATCH],
         )
-        print(f"  inserted {min(i + add_batch, len(documents))}/{len(documents)}")
+        print(f"  uploaded {min(i + ADD_BATCH, total)}/{total}")
 
     print("Chunks in DB:", collection.count())
 

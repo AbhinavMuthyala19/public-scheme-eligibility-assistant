@@ -1,35 +1,30 @@
-"""Vector retrieval over the Chroma scheme index.
+"""Vector retrieval over the scheme index (Chroma Cloud or local).
 
-Loads the embedding model + Chroma collection once, and searches by
-embedding a query, over-fetching chunks, then collapsing them back to
-unique schemes (since each scheme was split into several chunks).
+Embeds the query via the OpenAI API, over-fetches chunks, then collapses
+them back to unique schemes (each scheme was split into several chunks).
 """
 
-import chromadb
-from sentence_transformers import SentenceTransformer
-
-from config import CHROMA_DB_PATH, COLLECTION_NAME, EMBEDDING_MODEL, TOP_K
+from config import TOP_K
+from embeddings import embed_query
+from vectorstore import get_collection
 
 
 class SchemeRetriever:
     def __init__(self):
-        self.model = SentenceTransformer(EMBEDDING_MODEL)
-        self.client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-        self.collection = self.client.get_collection(COLLECTION_NAME)
+        self.collection = get_collection()
 
     def search_schemes(self, query_text: str, top_k: int = TOP_K,
                        over_fetch: int = 4, where: dict = None):
         """Return up to top_k unique schemes ranked by best-chunk similarity.
 
         `where` is an optional Chroma metadata filter, e.g.
-        {"state": {"$in": ["Punjab", "All"]}} to keep only a user's own
-        state plus nationally-available schemes.
+        {"state": {"$in": ["Punjab", "All"]}}.
         """
-        query_embedding = self.model.encode(query_text).tolist()
+        query_embedding = embed_query(query_text)
 
         query_args = {
             "query_embeddings": [query_embedding],
-            "n_results": top_k * over_fetch,   # fetch extra chunks, then dedupe
+            "n_results": top_k * over_fetch,
         }
         if where:
             query_args["where"] = where
@@ -40,7 +35,6 @@ class SchemeRetriever:
         distances = results["distances"][0]
         documents = results["documents"][0]
 
-        # Collapse chunks -> schemes, keeping each scheme's closest chunk.
         best = {}
         for meta, distance, document in zip(metadatas, distances, documents):
             scheme_id = meta["scheme_id"]
