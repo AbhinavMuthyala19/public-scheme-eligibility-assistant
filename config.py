@@ -31,6 +31,12 @@ OLLAMA_MODEL = "llama3.2"
 
 TOP_K = 10
 
+# Number of candidates pulled from Chroma before state-relevance re-ranking
+SEARCH_POOL_SIZE = 30
+
+# Max schemes shown to the user after eligibility filtering
+MAX_RECOMMENDATIONS = 5
+
 # ==========================
 # Chroma Collection
 # ==========================

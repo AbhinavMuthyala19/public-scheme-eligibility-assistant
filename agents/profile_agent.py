@@ -1,54 +1,57 @@
-import json
-import ollama
+from typing import Optional
 
 from config import OLLAMA_MODEL
-from models.schemas import UserProfile, ProfileAgentResponse
+from models.schemas import ProfileAgentResponse, UserProfile
 from prompts.profile_prompt import PROFILE_SYSTEM_PROMPT
+from utils.ollama_client import LLMResponseError, chat_structured
 
 
 class ProfileAgent:
+    """Extracts a structured UserProfile from free-text user messages.
+
+    Supports incremental extraction: pass the profile accumulated so far as
+    `existing_profile` and newly-extracted fields are merged on top of it,
+    so a multi-turn conversation can fill in missing fields one message at a time.
+    """
 
     REQUIRED_FIELDS = [
         "age",
         "gender",
-        "state"
+        "state",
     ]
 
-    def __init__(self):
-        self.model = OLLAMA_MODEL
+    def __init__(self, model: str = OLLAMA_MODEL):
+        self.model = model
 
-    def run(self, user_input: str) -> ProfileAgentResponse:
+    def run(
+        self,
+        user_input: str,
+        existing_profile: Optional[UserProfile] = None,
+    ) -> ProfileAgentResponse:
+        try:
+            extracted = chat_structured(
+                model=self.model,
+                system_prompt=PROFILE_SYSTEM_PROMPT,
+                user_content=user_input,
+                schema=UserProfile,
+            )
+        except LLMResponseError:
+            extracted = UserProfile()
 
-        response = ollama.chat(
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": PROFILE_SYSTEM_PROMPT
-                },
-                {
-                    "role": "user",
-                    "content": user_input
-                }
-            ]
+        profile = (
+            existing_profile.merge(extracted)
+            if existing_profile is not None
+            else extracted
         )
 
-        profile_json = json.loads(
-            response["message"]["content"]
-        )
-
-        profile = UserProfile.model_validate(
-            profile_json
-        )
-
-        missing_fields = []
-
-        for field in self.REQUIRED_FIELDS:
-            if getattr(profile, field) is None:
-                missing_fields.append(field)
+        missing_fields = [
+            field
+            for field in self.REQUIRED_FIELDS
+            if getattr(profile, field) is None
+        ]
 
         return ProfileAgentResponse(
             profile=profile,
             missing_fields=missing_fields,
-            is_complete=len(missing_fields) == 0
+            is_complete=len(missing_fields) == 0,
         )

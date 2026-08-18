@@ -1,4 +1,3 @@
-```text
 chromadb
 sentence-transformers
 streamlit
@@ -6,4 +5,5 @@ pandas
 numpy
 pydantic
 ollama
-```
+pytest
+pytest-mock
